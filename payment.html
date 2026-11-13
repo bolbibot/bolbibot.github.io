@@ -1,0 +1,110 @@
+<!doctype html>
+<!-- Страница «Оплата и возврат». Пункты с пометкой «если подключено» оставить только после проверки в личном кабинете ЮKassa. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Оплата и возврат — BolBiBot</title>
+<meta name="description" content="Способы оплаты услуг BolBiBot и сервиса BeautyOS, безопасность платежей, чеки, порядок и сроки возврата.">
+<style>
+@font-face{font-family:Onest;font-weight:700;font-display:swap;src:url(fonts/onest-cyrillic-700-normal.woff2) format('woff2');unicode-range:U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:Onest;font-weight:700;font-display:swap;src:url(fonts/onest-latin-700-normal.woff2) format('woff2');unicode-range:U+0000-00FF,U+2000-206F,U+20BD}
+@font-face{font-family:Golos;font-weight:400;font-display:swap;src:url(fonts/golos-text-cyrillic-400-normal.woff2) format('woff2');unicode-range:U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:Golos;font-weight:400;font-display:swap;src:url(fonts/golos-text-latin-400-normal.woff2) format('woff2');unicode-range:U+0000-00FF,U+2000-206F,U+20BD}
+@font-face{font-family:Golos;font-weight:500;font-display:swap;src:url(fonts/golos-text-cyrillic-500-normal.woff2) format('woff2');unicode-range:U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:Golos;font-weight:500;font-display:swap;src:url(fonts/golos-text-latin-500-normal.woff2) format('woff2');unicode-range:U+0000-00FF,U+2000-206F,U+20BD}
+:root{--paper:#ECEBF2;--ink:#17141F;--muted:#5D5970;--line:#CFCCDB;--cobalt:#3B2FE6;--cobalt-ink:#FFFFFF;--mint:#8FE3C0;--card:#F7F6FB}
+*{box-sizing:border-box;margin:0}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--paper);color:var(--ink);font:400 17px/1.6 Golos,system-ui,sans-serif;overflow-wrap:break-word}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--cobalt);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 0}
+.logo{font:700 20px/1 Onest,sans-serif;letter-spacing:-.02em;text-decoration:none}
+.logo b{color:var(--cobalt)}
+header nav a{margin-left:22px;text-decoration:none;color:var(--muted);font-weight:500}
+header nav a:hover{color:var(--ink)}
+.doc{max-width:780px;padding:40px 0 64px;border-bottom:1px solid var(--line)}
+.doc h1{font:700 clamp(34px,6vw,60px)/1.02 Onest,sans-serif;letter-spacing:-.035em;margin-bottom:16px}
+.doc .meta{color:var(--muted);margin-bottom:32px}
+.doc h2{font:700 24px/1.2 Onest,sans-serif;letter-spacing:-.02em;margin:40px 0 12px}
+.doc p,.doc li{margin:8px 0}
+.doc ol,.doc ul{padding-left:22px}
+.note{background:var(--card);border:2px solid var(--line);border-radius:16px;padding:16px 18px;margin:20px 0;color:var(--muted)}
+.tbl{overflow-x:auto;margin:16px 0}
+table{border-collapse:collapse;width:100%;min-width:0;font-size:15px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--card);font-weight:500}
+footer{padding:28px 0 44px;color:var(--muted);font-size:15px;display:grid;gap:10px}
+footer a{text-decoration:none;border-bottom:1px solid var(--line)}
+footer .links{display:flex;flex-wrap:wrap;gap:8px 22px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="logo" href="index.html" aria-label="BolBiBot — на главную">Bol<b>Bi</b>Bot</a>
+    <nav aria-label="Разделы"><a href="index.html#prices">Цены</a></nav>
+  </header>
+
+  <main class="doc">
+    <h1>Оплата и возврат</h1>
+    <p class="meta">Редакция от 13.11.2026. Полные условия — в <a href="offer.html">публичной оферте</a>.</p>
+
+    <h2>Что можно оплатить</h2>
+    <ul>
+      <li>услуги разработки — сайты, приложения, видеоролики, ИИ-ассистенты — по согласованному заказу или счёту;</li>
+      <li>подписку на сервис BeautyOS на 1, 6 или 12 месяцев;</li>
+      <li>пополнение баланса ИИ-функций BeautyOS на 500, 1 000 или 3 000 ₽.</li>
+    </ul>
+    <p>Цены — в разделе «<a href="index.html#prices">Цены</a>». Клиенты салонов оплачивают услуги салона напрямую салону, а не через нас.</p>
+
+    <h2>Способы оплаты</h2>
+    <p>Платежи принимаются через сервис ЮKassa:</p>
+    <ul>
+      <li>банковской картой;</li>
+      <li>иными способами, которые показаны на странице оплаты ЮKassa;</li>
+      <li>организации и ИП — по счёту.</li>
+    </ul>
+    <p>Деньги получает исполнитель — Ликучев Артём Александрович, самозанятый, ИНН 390511832205. Комиссия за оплату с покупателя не взимается.</p>
+
+    <h2>Безопасность платежей</h2>
+    <p>Данные карты вы вводите на защищённой платёжной странице ЮKassa по протоколу HTTPS. Мы не видим и не храним номер карты, срок её действия и код. По информации ЮKassa, сервис ежегодно проходит проверку на соответствие стандарту безопасности платёжных карт PCI DSS.</p>
+
+    <h2>Чек</h2>
+    <p>Исполнитель применяет налог на профессиональный доход, поэтому вместо кассового чека вы получаете чек из приложения ФНС «Мой налог» (ст. 14 Федерального закона № 422-ФЗ). Чек приходит на e-mail или телефон, указанный при оплате. Организациям и ИП: сообщите ИНН до оплаты — он будет указан в чеке.</p>
+    <p>Пополнение баланса ИИ — это предоплата: чек формируется на всю сумму в момент оплаты, а не при каждом списании.</p>
+
+    <h2>Возврат</h2>
+    <div class="tbl"><table>
+      <tr><th>Что оплачено</th><th>Сколько возвращается</th></tr>
+      <tr><td>Услуги разработки</td><td>Внесённая сумма за вычетом стоимости фактически оказанной части работ и подтверждённых расходов (ст. 32 Закона «О защите прав потребителей», п. 1 ст. 782 ГК РФ)</td></tr>
+      <tr><td>Подписка BeautyOS</td><td>Стоимость неиспользованных полных дней оплаченного периода — пропорционально фактически уплаченной сумме</td></tr>
+      <tr><td>Баланс ИИ</td><td>Весь неиспользованный остаток</td></tr>
+    </table></div>
+    <ol>
+      <li>Напишите на bolbibot.apps@gmail.com с адреса, указанного при оплате, или из кабинета BeautyOS: что оплачено, дата платежа, почему отказываетесь.</li>
+      <li>Мы ответим и пришлём расчёт суммы возврата.</li>
+      <li>Возвращаем тем же способом, которым вы платили, в течение 10 календарных дней с получения заявления. Срок зачисления на карту зависит от вашего банка.</li>
+      <li>При возврате чек в «Мой налог» аннулируется или корректируется.</li>
+    </ol>
+
+    <h2>Если что-то пошло не так</h2>
+    <p>Деньги списались, а доступ не открылся или баланс не пополнился — напишите на bolbibot.apps@gmail.com или позвоните +7 981 592-42-39, приложите дату и сумму платежа. Режим работы: пн–пт, 10:00–19:00 (МСК).</p>
+  </main>
+
+  <footer>
+    <span>Исполнитель: Ликучев Артём Александрович, плательщик налога на профессиональный доход (самозанятый), ИНН 390511832205</span>
+    <span>Почтовый адрес: Санкт-Петербург, пр-кт Испытателей, д. 39 · E-mail: bolbibot.apps@gmail.com · Телефон: +7 981 592-42-39 · Режим работы: пн–пт, 10:00–19:00 (МСК)</span>
+    <nav class="links" aria-label="Документы">
+      <a href="index.html#prices">Цены</a>
+      <a href="offer.html">Публичная оферта</a>
+      <a href="privacy.html">Политика обработки персональных данных</a>
+      <a href="payment.html">Оплата и возврат</a>
+    </nav>
+    <span>© 2026 BolBiBot</span>
+  </footer>
+</div>
+</body>
+</html>
