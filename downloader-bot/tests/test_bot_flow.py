@@ -234,3 +234,49 @@ async def test_plain_commands(app):
         await app.text(cmd)
     texts_sent = [c.text for c in app.session.of("SendMessage")]
     assert len(texts_sent) == 4 and "<code>1</code>" in texts_sent[2]
+
+
+async def test_probe_rate_limit(app, monkeypatch):
+    calls = []
+
+    async def probe(s, url, site):
+        calls.append(url)
+        return INFO
+
+    monkeypatch.setattr(downloader, "probe", probe)
+    for _ in range(12):
+        await app.text("https://rutube.ru/video/abc/")
+    assert len(calls) == 10
+    assert app.session.of("SendMessage")[-1].text == texts.TOO_MANY
+
+
+async def test_blocked_user_is_refused_before_probe(app, monkeypatch):
+    calls = []
+
+    async def probe(s, url, site):
+        calls.append(url)
+        return INFO
+
+    monkeypatch.setattr(downloader, "probe", probe)
+    await billing.ensure_user(app.db, 1)
+    await app.db.execute("UPDATE users SET blocked=1 WHERE id=1")
+    await app.text("https://rutube.ru/video/abc/")
+    assert calls == []
+    assert app.session.of("SendMessage")[-1].text == texts.BLOCKED
+
+
+async def test_simultaneous_links_start_one_probe(app, monkeypatch):
+    import asyncio
+    gate, calls = asyncio.Event(), []
+
+    async def probe(s, url, site):
+        calls.append(url)
+        await gate.wait()
+        return INFO
+
+    monkeypatch.setattr(downloader, "probe", probe)
+    tasks = [asyncio.create_task(app.text("https://rutube.ru/video/abc/")) for _ in range(4)]
+    await asyncio.sleep(0.05)
+    gate.set()
+    await asyncio.gather(*tasks)
+    assert len(calls) == 1

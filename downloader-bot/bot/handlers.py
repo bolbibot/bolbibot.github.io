@@ -13,7 +13,8 @@ from aiogram.types import (CallbackQuery, FSInputFile, LabeledPrice, Message,
                            PreCheckoutQuery)
 
 from . import billing, downloader, keyboards, robokassa, texts
-from .core import Ctx, PendingLink, get_pending, is_blocked, process_download, put_pending
+from .core import (Ctx, PendingLink, get_pending, is_blocked, process_download, put_pending,
+                   user_blocked)
 from .downloader import DownloadError, VideoInfo
 from .links import LinkError, check_url, extract_url
 
@@ -90,7 +91,8 @@ def build_router(ctx: Ctx) -> Router:
     @router.message(CommandStart())
     async def on_start(message: Message):
         await billing.ensure_user(db, message.from_user.id)
-        await db.execute("UPDATE users SET accepted_terms=1 WHERE id=?", (message.from_user.id,))
+        await billing.write(db, "UPDATE users SET accepted_terms=1 WHERE id=?",
+                            (message.from_user.id,))
         await message.answer(texts.welcome(s), reply_markup=keyboards.promo_kb(s))
 
     @router.message(Command("help"))
@@ -163,7 +165,7 @@ def build_router(ctx: Ctx) -> Router:
         flag = 1 if command.command == "block" else 0
         if arg.isdigit():
             await billing.ensure_user(db, int(arg))
-            await db.execute("UPDATE users SET blocked=? WHERE id=?", (flag, int(arg)))
+            await billing.write(db, "UPDATE users SET blocked=? WHERE id=?", (flag, int(arg)))
             return await message.answer("Готово.")
         try:
             site = check_url(arg, s.allowed_hosts)
@@ -171,13 +173,13 @@ def build_router(ctx: Ctx) -> Router:
         except (LinkError, DownloadError) as e:
             return await message.answer(f"Формат: /{command.command} ID_пользователя или ссылка. ({e})")
         if flag:
-            await db.execute("INSERT OR IGNORE INTO blocked_videos VALUES (?,?)",
-                             (site, info.video_id))
-            await db.execute("DELETE FROM file_cache WHERE site=? AND video_id=?",
-                             (site, info.video_id))
+            await billing.write(db, "INSERT OR IGNORE INTO blocked_videos VALUES (?,?)",
+                                (site, info.video_id))
+            await billing.write(db, "DELETE FROM file_cache WHERE site=? AND video_id=?",
+                                (site, info.video_id))
         else:
-            await db.execute("DELETE FROM blocked_videos WHERE site=? AND video_id=?",
-                             (site, info.video_id))
+            await billing.write(db, "DELETE FROM blocked_videos WHERE site=? AND video_id=?",
+                                (site, info.video_id))
         await message.answer("Готово.")
 
     # ---------- оплата ----------
@@ -246,25 +248,31 @@ def build_router(ctx: Ctx) -> Router:
             site = check_url(url, s.allowed_hosts)
         except LinkError as e:
             return await message.answer(texts.error(e.code))
+        if await user_blocked(ctx, user_id):
+            return await message.answer(texts.BLOCKED)
         quota = await billing.get_quota(db, s, user_id)
         if quota.source is None:
             return await message.answer(texts.limit_reached(s), reply_markup=keyboards.tariffs_kb(s))
         if quota.source == "free" and s.required_channel and not await subscribed(bot, user_id):
             return await message.answer(texts.need_channel(s.required_channel))
+        # проверка и отметка идут подряд, без await между ними: иначе пачка ссылок
+        # запустила бы несколько запросов к сайту одновременно
         if user_id in probing or ctx.jobs.has(user_id):
             return await message.answer(texts.BUSY)
-
-        note = await message.answer(texts.LOOKING)
+        if not ctx.probe_limiter.allow(user_id):
+            return await message.answer(texts.TOO_MANY)
         probing.add(user_id)
+        note = None
         try:
+            note = await message.answer(texts.LOOKING)
             async with probe_sem:
                 info = await downloader.probe(s, url, site)
         except DownloadError as e:
             log.info("probe не удался: %s %s", e.code, e.detail[:300])
-            return await safe_edit(note, texts.error(e.code))
+            return note and await safe_edit(note, texts.error(e.code))
         except Exception:
             log.exception("probe упал")
-            return await safe_edit(note, texts.error("unknown"))
+            return note and await safe_edit(note, texts.error("unknown"))
         finally:
             probing.discard(user_id)
         if await is_blocked(ctx, user_id, info.site, info.video_id):

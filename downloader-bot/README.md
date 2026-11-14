@@ -25,6 +25,7 @@ git clone https://github.com/bolbibot/bolbibot.github.io.git
 cd bolbibot.github.io/downloader-bot
 cp .env.example .env
 nano .env            # заполните BOT_TOKEN, TELEGRAM_API_ID, TELEGRAM_API_HASH, ADMIN_IDS
+mkdir -p data && sudo chown 1000:1000 data   # бот в контейнере работает не от root
 docker compose up -d --build
 docker compose logs -f bot
 ```
@@ -50,9 +51,11 @@ curl "https://api.telegram.org/bot<ТОКЕН>/logOut"
 | `PRICE_P50_STARS` / `PRICE_P50_RUB` | 100 / 199 | 50 скачиваний |
 | `PRICE_UNLIM30_STARS` / `PRICE_UNLIM30_RUB` | 150 / 299 | безлимит на 30 дней |
 | `MAX_DURATION` | 10800 | максимальная длина ролика, секунды |
+| `DOWNLOAD_TIMEOUT` | 1800 | сколько секунд даётся на одно скачивание |
 | `PARALLEL` | 3 | сколько видео скачивается одновременно |
 
 Скачивание списывается только после того, как файл пришёл в чат.
+Один человек может прислать не больше 10 ссылок за 10 минут.
 Тексты сообщений — в `bot/texts.py`.
 
 ## Если YouTube не отдаёт видео

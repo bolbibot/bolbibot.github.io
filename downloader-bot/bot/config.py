@@ -30,6 +30,7 @@ class Settings:
     free_per_day: int = 1
     max_duration: int = 3 * 60 * 60
     max_filesize: int = 2_000_000_000
+    download_timeout: int = 30 * 60
     parallel: int = 3
     allowed_hosts: tuple[str, ...] = DEFAULT_HOSTS
     required_channel: str | None = None
@@ -93,6 +94,7 @@ def load_settings(env: Mapping[str, str]) -> Settings:
         free_per_day=num("FREE_PER_DAY", 1),
         max_duration=num("MAX_DURATION", 3 * 60 * 60),
         max_filesize=num("MAX_FILESIZE", 2_000_000_000),
+        download_timeout=num("DOWNLOAD_TIMEOUT", 30 * 60),
         parallel=num("PARALLEL", 3),
         allowed_hosts=hosts or DEFAULT_HOSTS,
         required_channel=_opt(env.get("REQUIRED_CHANNEL")),

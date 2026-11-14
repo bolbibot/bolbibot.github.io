@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,7 +13,10 @@ import yt_dlp.utils
 
 from .config import Settings
 
+log = logging.getLogger(__name__)
 TARGETS = (360, 720, 1080)
+AUDIO_SUFFIXES = (".m4a", ".mp3", ".opus", ".ogg", ".aac", ".weba", ".wav", ".flac")
+PART_RE = re.compile(r"\.f[\w-]+\.\w+$")  # несклеенная половина: abc.f140.m4a
 SKIP_SUFFIXES = (".part", ".ytdl", ".tmp", ".jpg", ".webp", ".png", ".json")
 
 
@@ -137,7 +143,32 @@ class _Quiet:
     def debug(self, msg):
         pass
 
-    warning = error = debug
+    error = debug
+
+    def warning(self, msg):
+        log.warning("yt-dlp: %s", str(msg)[:500])
+
+
+def make_guard(max_bytes: int, deadline: float):
+    """Обрывает загрузку, когда скачано слишком много или прошло слишком много времени.
+
+    Нужен потому, что max_filesize у yt-dlp не действует на потоковые (HLS/DASH) видео.
+    """
+    sizes: dict[str, int] = {}
+
+    def guard(d: dict) -> None:
+        if d.get("status") not in ("downloading", "finished"):
+            return
+        sizes[str(d.get("filename"))] = int(d.get("downloaded_bytes") or 0)
+        if sum(sizes.values()) > max_bytes:
+            guard.tripped = "too_big"
+        elif time.monotonic() > deadline:
+            guard.tripped = "timeout"
+        if guard.tripped:
+            raise DownloadError(guard.tripped)
+
+    guard.tripped = None
+    return guard
 
 
 def ydl_opts(s: Settings, site: str) -> dict:
@@ -212,21 +243,38 @@ async def download(s: Settings, url: str, site: str, quality: str, workdir: Path
         "overwrites": True,
         "concurrent_fragment_downloads": 4,
     })
+    guard = make_guard(s.max_filesize, time.monotonic() + s.download_timeout)
+    opts["progress_hooks"] = [guard]
     if quality == "audio":
         opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3",
                                    "preferredquality": "192"}]
     else:
         opts["merge_output_format"] = "mp4"
-    await asyncio.to_thread(_extract, opts, url, True)
+    try:
+        info = await asyncio.to_thread(_extract, opts, url, True)
+    except DownloadError:
+        if guard.tripped:  # yt-dlp мог обернуть наше исключение в своё
+            raise DownloadError(guard.tripped) from None
+        raise
 
-    files = [p for p in workdir.iterdir() if p.is_file() and not p.name.endswith(SKIP_SUFFIXES)]
-    if not files:  # yt-dlp молча пропускает файл больше max_filesize
+    files = []
+    for item in info.get("requested_downloads") or []:
+        path = item.get("filepath")
+        if path and Path(path).is_file():
+            files.append(Path(path))
+    if not files:
+        files = [p for p in workdir.iterdir() if p.is_file()
+                 and not p.name.endswith(SKIP_SUFFIXES) and not PART_RE.search(p.name)]
+    if quality == "audio":
+        files = [p for p in files if p.suffix.lower() == ".mp3"]
+    else:
+        files = [p for p in files if p.suffix.lower() not in AUDIO_SUFFIXES]
+    if not files:  # yt-dlp молча пропускает часть больше max_filesize
         raise DownloadError("too_big")
     result = max(files, key=lambda p: p.stat().st_size)
     if result.stat().st_size > s.max_filesize:
         raise DownloadError("too_big")
     return result
-
 
 async def video_size(path: Path) -> tuple[int, int] | None:
     """Ширина и высота видео — чтобы Telegram показал его без искажений."""

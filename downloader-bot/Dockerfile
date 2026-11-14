@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+# deno нужен yt-dlp для YouTube: без него часть качеств пропадает
+COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*

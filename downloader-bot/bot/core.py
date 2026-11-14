@@ -6,6 +6,7 @@ import secrets
 import shutil
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol
@@ -19,6 +20,28 @@ log = logging.getLogger(__name__)
 
 PENDING_TTL = 60 * 60
 PENDING_MAX = 1000
+PENDING_PER_USER = 5
+
+
+class RateLimiter:
+    """Не больше limit событий за window секунд на человека."""
+
+    def __init__(self, limit: int, window: float):
+        self.limit, self.window = limit, window
+        self._hits: dict[int, deque] = {}
+
+    def allow(self, user_id: int, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        if len(self._hits) > 1000:
+            for key in [k for k, q in self._hits.items() if now - q[-1] >= self.window]:
+                del self._hits[key]
+        hits = self._hits.setdefault(user_id, deque())
+        while hits and now - hits[0] >= self.window:
+            hits.popleft()
+        if len(hits) >= self.limit:
+            return False
+        hits.append(now)
+        return True
 
 
 @dataclass
@@ -35,6 +58,7 @@ class Ctx:
     db: object
     jobs: Jobs
     pending: dict[str, PendingLink] = field(default_factory=dict)
+    probe_limiter: RateLimiter = field(default_factory=lambda: RateLimiter(10, 600))
 
 
 class Sender(Protocol):
@@ -45,6 +69,9 @@ class Sender(Protocol):
 def put_pending(ctx: Ctx, link: PendingLink) -> str:
     now = time.time()
     for key in [k for k, v in ctx.pending.items() if now - v.created > PENDING_TTL]:
+        del ctx.pending[key]
+    own = [k for k, v in ctx.pending.items() if v.user_id == link.user_id]
+    for key in own[:max(0, len(own) - PENDING_PER_USER + 1)]:  # свои старые кнопки
         del ctx.pending[key]
     while len(ctx.pending) >= PENDING_MAX:
         del ctx.pending[next(iter(ctx.pending))]  # самый старый
@@ -61,10 +88,14 @@ def get_pending(ctx: Ctx, token: str) -> PendingLink | None:
     return link
 
 
-async def is_blocked(ctx: Ctx, user_id: int, site: str, video_id: str) -> bool:
+async def user_blocked(ctx: Ctx, user_id: int) -> bool:
     cur = await ctx.db.execute("SELECT blocked FROM users WHERE id=?", (user_id,))
     row = await cur.fetchone()
-    if row and row["blocked"]:
+    return bool(row and row["blocked"])
+
+
+async def is_blocked(ctx: Ctx, user_id: int, site: str, video_id: str) -> bool:
+    if await user_blocked(ctx, user_id):
         return True
     cur = await ctx.db.execute(
         "SELECT 1 FROM blocked_videos WHERE site=? AND video_id=?", (site, video_id))
@@ -101,8 +132,8 @@ async def process_download(ctx: Ctx, user_id: int, pending: PendingLink, quality
                     file_id = await send(cached["file_id"], kind, info)
                 except Exception:
                     log.warning("кэш file_id не сработал для %s/%s", info.site, info.video_id)
-                    await db.execute(
-                        "DELETE FROM file_cache WHERE site=? AND video_id=? AND quality=?",
+                    await billing.write(
+                        db, "DELETE FROM file_cache WHERE site=? AND video_id=? AND quality=?",
                         (info.site, info.video_id, quality))
             if file_id is None:
                 await status("downloading")
@@ -118,8 +149,8 @@ async def process_download(ctx: Ctx, user_id: int, pending: PendingLink, quality
             await billing.record_download(db, user_id, info.site, info.video_id, quality,
                                           size, paid_with)
             if file_id:
-                await db.execute(
-                    "INSERT OR REPLACE INTO file_cache (site, video_id, quality, file_id, kind)"
+                await billing.write(
+                    db, "INSERT OR REPLACE INTO file_cache (site, video_id, quality, file_id, kind)"
                     " VALUES (?,?,?,?,?)", (info.site, info.video_id, quality, file_id, kind))
             return "sent"
     except Busy:

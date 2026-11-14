@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,7 @@ from zoneinfo import ZoneInfo
 from .config import Settings, Tariff
 
 MOSCOW = ZoneInfo("Europe/Moscow")
+log = logging.getLogger(__name__)
 
 
 def _now(now: datetime | None) -> datetime:
@@ -20,22 +22,35 @@ def moscow_today(now: datetime | None = None) -> str:
     return _now(now).astimezone(MOSCOW).date().isoformat()
 
 
-@asynccontextmanager
-async def _tx(db):
-    """Одна пишущая транзакция за раз на соединение."""
-    lock = getattr(db, "_tx_lock", None)
+def _lock(db) -> asyncio.Lock:
+    lock = getattr(db, "_write_lock", None)
     if lock is None:
         lock = asyncio.Lock()
-        db._tx_lock = lock
-    async with lock:
-        await db.execute("BEGIN IMMEDIATE")
+        db._write_lock = lock
+    return lock
+
+
+@asynccontextmanager
+async def transaction(db):
+    """Одна пишущая транзакция за раз на соединение; при любой ошибке — откат."""
+    async with _lock(db):
         try:
+            await db.execute("BEGIN IMMEDIATE")
             yield
-        except BaseException:
-            await db.execute("ROLLBACK")
-            raise
-        else:
             await db.execute("COMMIT")
+        except BaseException:
+            if db.in_transaction:
+                try:
+                    await db.execute("ROLLBACK")
+                except Exception:
+                    log.exception("не удалось откатить транзакцию")
+            raise
+
+
+async def write(db, sql: str, params: tuple = ()):
+    """Одиночная запись. Ждёт, пока закончится чужая транзакция, чтобы не попасть в неё."""
+    async with _lock(db):
+        return await db.execute(sql, params)
 
 
 @dataclass
@@ -55,11 +70,11 @@ class Quota:
         return None
 
 
+_NEW_USER = "INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)"
+
+
 async def ensure_user(db, user_id: int) -> None:
-    await db.execute(
-        "INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)",
-        (user_id, _now(None).isoformat()),
-    )
+    await write(db, _NEW_USER, (user_id, _now(None).isoformat()))
 
 
 def _quota_from_row(row, s: Settings, now: datetime) -> Quota:
@@ -71,19 +86,22 @@ def _quota_from_row(row, s: Settings, now: datetime) -> Quota:
 
 
 async def _user_row(db, user_id: int):
-    await ensure_user(db, user_id)
+    """Только внутри transaction(): блокировка уже взята."""
+    await db.execute(_NEW_USER, (user_id, _now(None).isoformat()))
     cur = await db.execute("SELECT * FROM users WHERE id=?", (user_id,))
     return await cur.fetchone()
 
 
 async def get_quota(db, s: Settings, user_id: int, now: datetime | None = None) -> Quota:
-    return _quota_from_row(await _user_row(db, user_id), s, _now(now))
+    await ensure_user(db, user_id)
+    cur = await db.execute("SELECT * FROM users WHERE id=?", (user_id,))
+    return _quota_from_row(await cur.fetchone(), s, _now(now))
 
 
 async def charge(db, s: Settings, user_id: int, now: datetime | None = None) -> str | None:
     """Списывает одно скачивание. Возвращает, чем оплачено, или None."""
     now = _now(now)
-    async with _tx(db):
+    async with transaction(db):
         row = await _user_row(db, user_id)
         quota = _quota_from_row(row, s, now)
         source = quota.source
@@ -103,8 +121,8 @@ async def create_order(db, user_id: int, tariff: Tariff, method: str) -> int:
         raise ValueError(method)
     amount = tariff.stars if method == "stars" else tariff.rub
     await ensure_user(db, user_id)
-    cur = await db.execute(
-        "INSERT INTO orders (user_id, tariff, method, amount, created_at) VALUES (?,?,?,?,?)",
+    cur = await write(
+        db, "INSERT INTO orders (user_id, tariff, method, amount, created_at) VALUES (?,?,?,?,?)",
         (user_id, tariff.key, method, amount, _now(None).isoformat()),
     )
     return cur.lastrowid
@@ -120,7 +138,7 @@ async def credit_order(db, s: Settings, order_id: int, paid_amount: int,
                        method: str | None = None) -> str:
     """Зачисляет оплату ровно один раз: credited / already / mismatch / unknown."""
     now = _now(now)
-    async with _tx(db):
+    async with transaction(db):
         order = await get_order(db, order_id)
         if order is None:
             return "unknown"
@@ -151,7 +169,7 @@ async def credit_order(db, s: Settings, order_id: int, paid_amount: int,
 
 async def refund_order(db, s: Settings, order_id: int) -> bool:
     """Отмечает заказ возвращённым и снимает начисленное. False, если заказ не оплачен."""
-    async with _tx(db):
+    async with transaction(db):
         cur = await db.execute(
             "UPDATE orders SET status='refunded' WHERE id=? AND status='paid'", (order_id,))
         if cur.rowcount != 1:
@@ -172,8 +190,8 @@ async def refund_order(db, s: Settings, order_id: int) -> bool:
 
 async def record_download(db, user_id: int, site: str, video_id: str, quality: str,
                           size: int | None, paid_with: str) -> None:
-    await db.execute(
-        "INSERT INTO downloads (user_id, site, video_id, quality, size, paid_with, created_at)"
+    await write(
+        db, "INSERT INTO downloads (user_id, site, video_id, quality, size, paid_with, created_at)"
         " VALUES (?,?,?,?,?,?,?)",
         (user_id, site, video_id, quality, size, paid_with, _now(None).isoformat()),
     )
