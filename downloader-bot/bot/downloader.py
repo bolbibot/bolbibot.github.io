@@ -131,8 +131,18 @@ def map_error(message: str) -> str:
     return "unknown"
 
 
+class _Quiet:
+    """yt-dlp пишет ошибки в stderr даже с quiet=True; ошибки мы получаем исключениями."""
+
+    def debug(self, msg):
+        pass
+
+    warning = error = debug
+
+
 def ydl_opts(s: Settings, site: str) -> dict:
     opts: dict = {
+        "logger": _Quiet(),
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,

@@ -116,7 +116,8 @@ async def get_order(db, order_id: int):
 
 
 async def credit_order(db, s: Settings, order_id: int, paid_amount: int,
-                       tg_charge_id: str | None = None, now: datetime | None = None) -> str:
+                       tg_charge_id: str | None = None, now: datetime | None = None,
+                       method: str | None = None) -> str:
     """Зачисляет оплату ровно один раз: credited / already / mismatch / unknown."""
     now = _now(now)
     async with _tx(db):
@@ -128,6 +129,8 @@ async def credit_order(db, s: Settings, order_id: int, paid_amount: int,
         tariff = s.tariffs.get(order["tariff"])
         if tariff is None or int(paid_amount) != order["amount"]:
             return "mismatch"
+        if method is not None and order["method"] != method:
+            return "mismatch"  # заказ в звёздах нельзя закрыть рублями и наоборот
         cur = await db.execute(
             "UPDATE orders SET status='paid', paid_at=?, tg_charge_id=? WHERE id=? AND status='new'",
             (now.isoformat(), tg_charge_id, order_id),
