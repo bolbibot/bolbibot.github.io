@@ -24,6 +24,9 @@ def make_app(s: Settings, db, notify: Callable[[int, int], Awaitable[None]]) -> 
         if not robokassa.verify_result(s, out_sum, inv_id, signature):
             log.warning("robokassa: неверная подпись, InvId=%r", inv_id[:32])
             return web.Response(status=403, text="bad sign")
+        if str(data.get("IsTest", "")).strip() == "1" and not s.robokassa_test:
+            log.warning("robokassa: тестовое уведомление при выключенном тестовом режиме")
+            return web.Response(status=400, text="test mode is off")
         try:
             amount = Decimal(out_sum)
             order_id = int(inv_id)

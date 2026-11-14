@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import shutil
 import time
@@ -21,6 +22,19 @@ log = logging.getLogger(__name__)
 PENDING_TTL = 60 * 60
 PENDING_MAX = 1000
 PENDING_PER_USER = 5
+JOB_DIR_RE = re.compile(r"[0-9a-f]{32}")
+# Ответы Telegram, означающие, что сохранённый file_id больше не годится
+STALE_FILE_ID = ("wrong file identifier", "wrong remote file", "file reference", "wrong file_id",
+                 "invalid file", "file_id_invalid", "file is temporarily unavailable")
+
+
+def clean_tmp(tmp_dir: str) -> None:
+    """Удаляет остатки прошлых загрузок — только свои папки, остальное не трогает."""
+    root = Path(tmp_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    for child in root.iterdir():
+        if child.is_dir() and not child.is_symlink() and JOB_DIR_RE.fullmatch(child.name):
+            shutil.rmtree(child, ignore_errors=True)
 
 
 class RateLimiter:
@@ -130,14 +144,20 @@ async def process_download(ctx: Ctx, user_id: int, pending: PendingLink, quality
             if cached:
                 try:
                     file_id = await send(cached["file_id"], kind, info)
-                except Exception:
-                    log.warning("кэш file_id не сработал для %s/%s", info.site, info.video_id)
+                except Exception as e:
+                    if not any(n in str(e).lower() for n in STALE_FILE_ID):
+                        # лимит запросов, бот заблокирован человеком и т.п. — кэш ни при чём
+                        log.warning("не удалось отправить готовый файл: %s", e)
+                        return "error:send"
+                    log.warning("кэш file_id устарел для %s/%s", info.site, info.video_id)
                     await billing.write(
                         db, "DELETE FROM file_cache WHERE site=? AND video_id=? AND quality=?",
                         (info.site, info.video_id, quality))
             if file_id is None:
                 await status("downloading")
-                path = await downloader.download(s, pending.url, info.site, quality, workdir)
+                chosen = next(o for o in info.options if o.quality == quality)
+                path = await downloader.download(s, pending.url, info.site, quality, workdir,
+                                                 selector=chosen.selector)
                 size = path.stat().st_size
                 await status("sending")
                 try:

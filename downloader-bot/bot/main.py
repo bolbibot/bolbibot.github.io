@@ -4,8 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
-from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -16,7 +14,8 @@ from aiohttp import web
 
 from . import billing, texts
 from .config import load_settings
-from .core import Ctx
+from .config import Settings
+from .core import Ctx, clean_tmp
 from .db import open_db
 from .handlers import build_router
 from .jobs import Jobs
@@ -26,6 +25,18 @@ log = logging.getLogger("bot")
 CLOUD_API_LIMIT = 49_000_000  # обычный Bot API не принимает файлы больше 50 МБ
 
 
+def startup_warnings(s: Settings) -> list[str]:
+    """Настройки, с которыми бот запустится, но работать будет не так, как ждёт владелец."""
+    warnings = []
+    if s.robokassa_enabled and s.robokassa_test:
+        warnings.append("ROBOKASSA_TEST=1: включён ТЕСТОВЫЙ режим оплаты картой — тестовые "
+                        "платежи начисляют настоящие скачивания. Выключите перед запуском в работу.")
+    if not s.admin_ids:
+        warnings.append("ADMIN_IDS не задан: некому получать сообщения о сбоях оплаты, "
+                        "команды /stats, /refund и /block недоступны.")
+    return warnings
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     s = load_settings(os.environ)
@@ -33,8 +44,9 @@ async def main() -> None:
         log.warning("BOT_API_URL не задан: файлы ограничены 49 МБ")
         s.max_filesize = CLOUD_API_LIMIT
 
-    shutil.rmtree(s.tmp_dir, ignore_errors=True)  # остатки после прошлого запуска
-    Path(s.tmp_dir).mkdir(parents=True, exist_ok=True)
+    for warning in startup_warnings(s):
+        log.warning(warning)
+    clean_tmp(s.tmp_dir)  # остатки после прошлого запуска
     db = await open_db(s.db_path)
 
     session = None

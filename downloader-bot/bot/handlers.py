@@ -16,7 +16,7 @@ from . import billing, downloader, keyboards, robokassa, texts
 from .core import (Ctx, PendingLink, get_pending, is_blocked, process_download, put_pending,
                    user_blocked)
 from .downloader import DownloadError, VideoInfo
-from .links import LinkError, check_url, extract_url
+from .links import LinkError, check_url, extract_url, normalize_url
 
 log = logging.getLogger(__name__)
 SEND_TIMEOUT = 60 * 60
@@ -118,7 +118,7 @@ def build_router(ctx: Ctx) -> Router:
     async def on_stats(message: Message):
         if not is_admin(message.from_user.id):
             return await message.answer(texts.ADMIN_ONLY)
-        today = billing.moscow_today()
+        today = billing.moscow_day_start_utc()
 
         async def one(sql: str, *args):
             return (await (await db.execute(sql, args)).fetchone())[0] or 0
@@ -220,20 +220,41 @@ def build_router(ctx: Ctx) -> Router:
             await query.answer(ok=False, error_message=texts.ORDER_GONE)
 
     @router.message(F.successful_payment)
-    async def on_paid(message: Message):
+    async def on_paid(message: Message, bot: Bot):
         payment = message.successful_payment
+        user_id = message.from_user.id
+        charge_id = payment.telegram_payment_charge_id
         order_id = parse_payload(payment.invoice_payload)
         outcome = "unknown"
         if order_id and payment.currency == "XTR":
             outcome = await billing.credit_order(
-                db, s, order_id, payment.total_amount,
-                payment.telegram_payment_charge_id, method="stars")
-        if outcome in ("credited", "already"):
-            order = await billing.get_order(db, order_id)
+                db, s, order_id, payment.total_amount, charge_id, method="stars")
+        order = await billing.get_order(db, order_id) if order_id else None
+        same_payment = order is not None and order["tg_charge_id"] == charge_id
+        if outcome == "credited" or (outcome == "already" and same_payment):
             return await message.answer(texts.paid(s.tariffs[order["tariff"]]))
+
+        # Деньги пришли, а зачислить их некуда (второй платёж по тому же счёту,
+        # неизвестный заказ). Чужие деньги не держим: возвращаем сразу.
         log.error("оплата звёздами не зачислена: order=%s outcome=%s charge=%s",
-                  order_id, outcome, payment.telegram_payment_charge_id)
-        await message.answer(texts.PAY_FAILED)
+                  order_id, outcome, charge_id)
+        refunded = False
+        try:
+            await bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
+            refunded = True
+        except Exception:
+            log.exception("не удалось вернуть платёж %s", charge_id)
+        await billing.record_stray_payment(db, user_id, order_id, charge_id,
+                                           payment.total_amount, refunded)
+        await message.answer(texts.PAY_REFUNDED if refunded else texts.PAY_FAILED)
+        state = "возвращён автоматически" if refunded else "НЕ возвращён — верните вручную"
+        for admin_id in s.admin_ids:
+            try:
+                await bot.send_message(
+                    admin_id, f"Незачисленный платёж: пользователь {user_id}, заказ {order_id}, "
+                              f"{payment.total_amount} ⭐, платёж {charge_id}. Статус: {state}.")
+            except Exception:
+                log.warning("не удалось уведомить администратора %s", admin_id)
 
     # ---------- ссылка и выбор качества ----------
 
@@ -248,6 +269,7 @@ def build_router(ctx: Ctx) -> Router:
             site = check_url(url, s.allowed_hosts)
         except LinkError as e:
             return await message.answer(texts.error(e.code))
+        url = normalize_url(url, site)
         if await user_blocked(ctx, user_id):
             return await message.answer(texts.BLOCKED)
         quota = await billing.get_quota(db, s, user_id)

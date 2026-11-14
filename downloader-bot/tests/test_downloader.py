@@ -75,7 +75,7 @@ def test_ydl_opts():
                        "YOUTUBE_COOKIES": "/c.txt"})
     yt = ydl_opts(s, "youtube")
     assert yt["noplaylist"] is True
-    assert yt["allowed_extractors"] == ["default", "-generic"]
+    assert "default" not in yt["allowed_extractors"] and "generic" not in yt["allowed_extractors"]
     assert yt["proxy"] == "http://y" and yt["cookiefile"] == "/c.txt"
     ru = ydl_opts(s, "rutube")
     assert ru["proxy"] == "http://d" and "cookiefile" not in ru
@@ -118,7 +118,7 @@ async def probe_code(settings, info=None, error=None):
 async def test_probe_ok(settings, fake):
     FakeYDL.info = INFO
     info = await downloader.probe(settings, "https://rutube.ru/video/x/", "rutube")
-    assert (info.site, info.video_id, info.title, info.duration) == ("rutube", "abc", "T", 100)
+    assert (info.site, info.video_id, info.title, info.duration) == ("rutube", "rutube:abc", "T", 100)
     assert [o.quality for o in info.options] == ["360", "720", "audio"]
 
 

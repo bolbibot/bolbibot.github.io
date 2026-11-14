@@ -35,7 +35,7 @@ def ctx(db, settings):
 def dl(monkeypatch):
     state = {"calls": 0, "error": None, "gate": None}
 
-    async def fake(s, url, site, quality, workdir):
+    async def fake(s, url, site, quality, workdir, selector=None):
         state["calls"] += 1
         workdir = Path(workdir)
         workdir.mkdir(parents=True, exist_ok=True)

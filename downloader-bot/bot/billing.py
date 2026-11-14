@@ -30,6 +30,21 @@ def _lock(db) -> asyncio.Lock:
     return lock
 
 
+def moscow_day_start_utc(now: datetime | None = None) -> str:
+    """Начало текущих московских суток в том же виде, в каком хранится created_at."""
+    local = _now(now).astimezone(MOSCOW).replace(hour=0, minute=0, second=0, microsecond=0)
+    return local.astimezone(timezone.utc).isoformat()
+
+
+async def record_stray_payment(db, user_id: int, order_id: int | None, charge_id: str,
+                               amount: int, refunded: bool) -> None:
+    """Платёж получен, но не зачислен (например, второй платёж по одному заказу)."""
+    await write(
+        db, "INSERT INTO stray_payments (user_id, order_id, charge_id, amount, refunded, created_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (user_id, order_id, charge_id, amount, int(refunded), _now(None).isoformat()))
+
+
 @asynccontextmanager
 async def transaction(db):
     """Одна пишущая транзакция за раз на соединение; при любой ошибке — откат."""

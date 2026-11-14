@@ -10,6 +10,15 @@ _URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
 
+def normalize_url(url: str, site: str) -> str:
+    """Приводит ссылку к виду, который понимает yt-dlp."""
+    if site == "rutube":
+        return re.sub(r"(?i)^(https?://(?:www\.)?rutube\.ru)/shorts/", r"\1/video/", url)
+    if site == "ok":
+        return re.sub(r"(?i)^(https?://)m\.(ok\.ru/)", r"\1\2", url)
+    return url
+
+
 class LinkError(Exception):
     def __init__(self, code: str):
         super().__init__(code)

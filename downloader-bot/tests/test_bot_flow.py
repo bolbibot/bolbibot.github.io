@@ -61,7 +61,7 @@ async def app(db, settings, monkeypatch):
     async def probe(s, url, site):
         return INFO
 
-    async def download(s, url, site, quality, workdir):
+    async def download(s, url, site, quality, workdir, selector=None):
         Path(workdir).mkdir(parents=True, exist_ok=True)
         path = Path(workdir) / "abc.mp4"
         path.write_bytes(b"video")

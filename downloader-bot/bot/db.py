@@ -45,6 +45,15 @@ CREATE TABLE IF NOT EXISTS file_cache (
     kind TEXT NOT NULL,
     PRIMARY KEY (site, video_id, quality)
 );
+CREATE TABLE IF NOT EXISTS stray_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    order_id INTEGER,
+    charge_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    refunded INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS blocked_videos (
     site TEXT NOT NULL,
     video_id TEXT NOT NULL,

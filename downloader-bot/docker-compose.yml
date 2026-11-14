@@ -13,7 +13,7 @@ services:
 
   # Свой сервер Bot API: позволяет отправлять файлы до 2 ГБ (обычный лимит — 50 МБ)
   bot-api:
-    image: aiogram/telegram-bot-api:latest
+    image: aiogram/telegram-bot-api:${BOT_API_TAG:-latest}
     restart: unless-stopped
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
