@@ -1,0 +1,8 @@
+{$DOMAIN} {
+	handle /robokassa/* {
+		reverse_proxy bot:8080
+	}
+	handle {
+		respond 404
+	}
+}
