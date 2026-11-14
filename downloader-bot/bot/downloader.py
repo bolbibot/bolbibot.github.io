@@ -226,3 +226,17 @@ async def download(s: Settings, url: str, site: str, quality: str, workdir: Path
     if result.stat().st_size > s.max_filesize:
         raise DownloadError("too_big")
     return result
+
+
+async def video_size(path: Path) -> tuple[int, int] | None:
+    """Ширина и высота видео — чтобы Telegram показал его без искажений."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), 30)
+        width, height = out.decode().strip().splitlines()[0].split("x")[:2]
+        return int(width), int(height)
+    except Exception:
+        return None

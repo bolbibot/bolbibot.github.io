@@ -1,0 +1,134 @@
+"""Главный сценарий: проверить право на скачивание, скачать, отправить, списать."""
+from __future__ import annotations
+
+import logging
+import secrets
+import shutil
+import time
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Awaitable, Callable, Protocol
+
+from . import billing, downloader
+from .config import Settings
+from .downloader import DownloadError, VideoInfo
+from .jobs import Busy, Jobs
+
+log = logging.getLogger(__name__)
+
+PENDING_TTL = 60 * 60
+PENDING_MAX = 1000
+
+
+@dataclass
+class PendingLink:
+    url: str
+    info: VideoInfo
+    user_id: int
+    created: float
+
+
+@dataclass
+class Ctx:
+    settings: Settings
+    db: object
+    jobs: Jobs
+    pending: dict[str, PendingLink] = field(default_factory=dict)
+
+
+class Sender(Protocol):
+    async def __call__(self, source: Path | str, kind: str, info: VideoInfo) -> str:
+        """Отправляет файл (путь) или уже загруженный file_id; возвращает file_id."""
+
+
+def put_pending(ctx: Ctx, link: PendingLink) -> str:
+    now = time.time()
+    for key in [k for k, v in ctx.pending.items() if now - v.created > PENDING_TTL]:
+        del ctx.pending[key]
+    while len(ctx.pending) >= PENDING_MAX:
+        del ctx.pending[next(iter(ctx.pending))]  # самый старый
+    token = secrets.token_urlsafe(6)
+    ctx.pending[token] = link
+    return token
+
+
+def get_pending(ctx: Ctx, token: str) -> PendingLink | None:
+    link = ctx.pending.get(token)
+    if link is None or time.time() - link.created > PENDING_TTL:
+        ctx.pending.pop(token, None)
+        return None
+    return link
+
+
+async def is_blocked(ctx: Ctx, user_id: int, site: str, video_id: str) -> bool:
+    cur = await ctx.db.execute("SELECT blocked FROM users WHERE id=?", (user_id,))
+    row = await cur.fetchone()
+    if row and row["blocked"]:
+        return True
+    cur = await ctx.db.execute(
+        "SELECT 1 FROM blocked_videos WHERE site=? AND video_id=?", (site, video_id))
+    return await cur.fetchone() is not None
+
+
+async def process_download(ctx: Ctx, user_id: int, pending: PendingLink, quality: str,
+                           send: Sender, status: Callable[[str], Awaitable[None]]) -> str:
+    """Возвращает: sent | no_quota | busy | blocked | error:<код>."""
+    s, db, info = ctx.settings, ctx.db, pending.info
+    if pending.user_id != user_id or quality not in {o.quality for o in info.options}:
+        return "error:unknown"
+    await billing.ensure_user(db, user_id)
+    if await is_blocked(ctx, user_id, info.site, info.video_id):
+        return "blocked"
+    if (await billing.get_quota(db, s, user_id)).source is None:
+        return "no_quota"
+
+    kind = "audio" if quality == "audio" else "video"
+    workdir = Path(s.tmp_dir) / uuid.uuid4().hex
+    try:
+        async with ctx.jobs.slot(user_id):
+            # право могло быть потрачено, пока ждали очередь
+            if (await billing.get_quota(db, s, user_id)).source is None:
+                return "no_quota"
+            size = None
+            file_id = None
+            cur = await db.execute(
+                "SELECT file_id FROM file_cache WHERE site=? AND video_id=? AND quality=?",
+                (info.site, info.video_id, quality))
+            cached = await cur.fetchone()
+            if cached:
+                try:
+                    file_id = await send(cached["file_id"], kind, info)
+                except Exception:
+                    log.warning("кэш file_id не сработал для %s/%s", info.site, info.video_id)
+                    await db.execute(
+                        "DELETE FROM file_cache WHERE site=? AND video_id=? AND quality=?",
+                        (info.site, info.video_id, quality))
+            if file_id is None:
+                await status("downloading")
+                path = await downloader.download(s, pending.url, info.site, quality, workdir)
+                size = path.stat().st_size
+                await status("sending")
+                try:
+                    file_id = await send(path, kind, info)
+                except Exception:
+                    log.exception("не удалось отправить файл %s/%s", info.site, info.video_id)
+                    return "error:send"
+            paid_with = await billing.charge(db, s, user_id) or "none"
+            await billing.record_download(db, user_id, info.site, info.video_id, quality,
+                                          size, paid_with)
+            if file_id:
+                await db.execute(
+                    "INSERT OR REPLACE INTO file_cache (site, video_id, quality, file_id, kind)"
+                    " VALUES (?,?,?,?,?)", (info.site, info.video_id, quality, file_id, kind))
+            return "sent"
+    except Busy:
+        return "busy"
+    except DownloadError as e:
+        log.info("скачивание не удалось: %s %s", e.code, e.detail[:300])
+        return f"error:{e.code}"
+    except Exception:
+        log.exception("неожиданная ошибка при скачивании")
+        return "error:unknown"
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)

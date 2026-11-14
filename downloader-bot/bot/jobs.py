@@ -15,6 +15,13 @@ class Jobs:
         self._users: set[int] = set()
         self.waiting = 0
 
+    def has(self, user_id: int) -> bool:
+        return user_id in self._users
+
+    @property
+    def full(self) -> bool:
+        return self._sem.locked()
+
     @asynccontextmanager
     async def slot(self, user_id: int):
         if user_id in self._users:
